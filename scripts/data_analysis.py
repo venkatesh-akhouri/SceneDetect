@@ -12,12 +12,17 @@ if os.path.exists(labels_path):
     for filename in os.listdir(labels_path):
         if filename.endswith('.txt'):
             #read file
-            with open (os.path.join(labels_path, filename), 'r') as file:
-                words=file.read().strip().split()
-                if words:
-                    class_name=words[0]
-                    class_counts[class_name] += 1
-                    
+            try:
+                with open (os.path.join(labels_path, filename), 'r') as file:
+                    for line in file:
+                        words = line.strip().split()
+                        if words:
+                            class_name= words[0]
+                            class_counts[class_name] += 1
+            except OSError as e:
+                raise RuntimeError(f"Could not open file {os.path.join(labels_path, filename)} {e}")
+                        
+                
 
 print("-"*50)
 print("class_Counts")
