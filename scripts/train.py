@@ -1,4 +1,4 @@
-from ultralytics import YOLO
+from ultralytics import YOLO,settings
 import pandas as pd
 import os
 import wandb
@@ -14,7 +14,11 @@ else:
     print("using cpu...")
     device = 'cpu'
 
+
+settings.update({"wandb":True})
 wandb.login()
+
+
 
 
 
@@ -40,19 +44,20 @@ if os.path.exists(results_csv):
     results_df = pd.read_csv(results_csv)
 else:
     results_df=None
-#crteate an empty df
 
-wandb.init(
-    project="SceneDetect-Freeze_Layers",
-    name="Freeze-10-Run",
-    config={
-        "epochs": EPOCHS,
-        "imgsz": imgsz,
-        "freeze": freeze,
-        "batch_size": BATCH_SIZE,
-        "model": "yolo11n.pt"
-    }
-)
+# wandb.init(
+#     project="SceneDetect-Freeze_Layers",
+#     name="Freeze-10-Run",
+#     config={
+#         "epochs": EPOCHS,
+#         "imgsz": imgsz,
+#         "freeze": freeze,
+#         "batch_size": BATCH_SIZE,
+#         "model": "yolo11n.pt"
+#     }
+# )
+
+
 
 def train_model(model,data,epochs,imgsz,freeze,batch,run_name,device):
     results=model.train(data=data,
@@ -124,7 +129,8 @@ def peek_results(best_model_path,val_path,random_seed):
         image = result.plot()  # image with predicted boxes
         ax.imshow(image[..., ::-1])  # BGR to RGB
         ax.axis("off")
-        ax.set_title(result.path)
+        basename=os.path.basename(result.path)
+        ax.set_title(basename)
     
     plt.tight_layout()
     print("saving predictions")
@@ -136,13 +142,13 @@ if __name__=="__main__":
     
     #call the training function
     print("Training Model...")
-    metrics,best_model_path=train_model(model=MODEL,data=DATA,epochs=EPOCHS,imgsz=imgsz, freeze=freeze, batch=BATCH_SIZE,run_name="Test Run",device=device)
+    metrics,best_model_path=train_model(model=MODEL,data=DATA,epochs=EPOCHS,imgsz=imgsz, freeze=freeze, batch=BATCH_SIZE,run_name="Run-2",device=device)
     
     #track and save results
     print("Saving Resuts")
     results_df=track_results(metrics,results_df,EPOCHS,imgsz,freeze,BATCH_SIZE)
     
-    wandb.finish()
+
     print("training complete\n")
     
     print("predicting on validation images")
