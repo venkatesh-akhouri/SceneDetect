@@ -5,6 +5,7 @@ import wandb
 import torch
 import random
 from matplotlib import pyplot as plt
+import argparse
 
 #check if torch is available
 if torch.cuda.is_available():
@@ -34,10 +35,10 @@ val_path=os.path.join(root_dir,"data","kitti","data_object_image_2","training","
 #define hyperparameters/variables
 
 MODEL=YOLO("yolo11n.pt")  #get weights from a pretrained model for transfer learning
-EPOCHS= 100  #5 epochs to check if everything runs end to end
-imgsz=640
-freeze=10
-BATCH_SIZE=-1 #ultralytics automatically detects batch size basd on gpu choosen
+# EPOCHS= 100  #5 epochs to check if everything runs end to end
+# imgsz=640
+# freeze=10
+# BATCH_SIZE=-1 #ultralytics automatically detects batch size basd on gpu choosen
 DATA=os.path.join(root_dir, "training",'configs','data.yaml')
 
 if os.path.exists(results_csv):
@@ -59,13 +60,13 @@ else:
 
 
 
-def train_model(model,data,epochs,imgsz,freeze,batch,run_name,device):
+def train_model(model,data,epochs,imgsz,freeze,batch,project,run_name,device):
     results=model.train(data=data,
                         epochs=epochs,
                         imgsz=imgsz,
                         batch=batch,
                         freeze=freeze,
-                        project="SceneDetect-Freeze_Layers",
+                        project=project,
                         name=run_name,
                         plots=True,
                         device=device
@@ -136,17 +137,49 @@ def peek_results(best_model_path,val_path,random_seed):
     print("saving predictions")
     plt.savefig(out_path, dpi=150, bbox_inches="tight")
     
+
+#function for CLI
+def argparser():
+    parser = argparse.ArgumentParser(prog="train.py",
+                                     description="Train a Yolo model")
     
+    #addarguments to parser
+    parser.add_argument("--epochs", type=int, help="number of epochs",default=100)
+    parser.add_argument("--imgsz", type=int, help="image size",default=640)
+    parser.add_argument("--freeze", type=int, help="freeze layers",default=10)
+    parser.add_argument("--batch", type=int, help="batch size",default=-1)
+    parser.add_argument("--run_name", type=str, help="run name",default="Test Run")
+    parser.add_argument("--project", type=str, help="project name for wandb",default="Test Project")
+    
+    #return the parsers
+    return parser.parse_args()
     
 if __name__=="__main__":
     
+    args=argparser()
+    
+    print(f"Run configuration: {vars(args)}")
+    
     #call the training function
     print("Training Model...")
-    metrics,best_model_path=train_model(model=MODEL,data=DATA,epochs=EPOCHS,imgsz=imgsz, freeze=freeze, batch=BATCH_SIZE,run_name="Run-2",device=device)
+    metrics,best_model_path=train_model(model=MODEL,
+                                        data=DATA,
+                                        epochs=args.epochs,
+                                        imgsz=args.imgsz,
+                                        freeze=args.freeze,
+                                        batch=args.batch,
+                                        project=args.project,
+                                        run_name=args.run_name,
+                                        device=device)
     
     #track and save results
     print("Saving Resuts")
-    results_df=track_results(metrics,results_df,EPOCHS,imgsz,freeze,BATCH_SIZE)
+    results_df=track_results(metrics,
+                             results_df,
+                             args.epochs,
+                             args.imgsz,
+                             args.freeze,
+                             args.batch)
     
 
     print("training complete\n")
