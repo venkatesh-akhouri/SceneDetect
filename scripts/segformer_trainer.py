@@ -47,7 +47,9 @@ VAL_IMAGES_DIR=os.path.join(ROOT_DIR,'data','cityscapes','images','val')
 TRAIN_LABELS_DIR=os.path.join(ROOT_DIR,'data','cityscapes','gt','train')
 VAL_LABELS_DIR=os.path.join(ROOT_DIR,'data','cityscapes','gt','val')
 EVAL_PATH=os.path.join(ROOT_DIR,'data','evaluation')
-
+BEST_MODEL_PATH=os.path.join(ROOT_DIR,'models')
+#in case if directory does not exist
+os.makedirs(BEST_MODEL_PATH,exist_ok=True)
 
 
 
@@ -138,11 +140,15 @@ def train(model,epochs,optimiser,metric,train_dataloader,val_dataloader):
     train_mIOU=[]
     val_mIOU=[]
     
+    best_val_loss=float('inf')
+    
     for epoch in range(epochs):
         train_epoch_loss=0
         val_epoch_loss=0
         train_epoch_mIOU=0
         val_epoch_mIOU=0
+        
+       
         
         #switch to train
         model.train()
@@ -234,12 +240,21 @@ def train(model,epochs,optimiser,metric,train_dataloader,val_dataloader):
         avg_val_loss = val_epoch_loss/len(val_dataloader)
         
         
+        
+        if avg_val_loss < best_val_loss:
+            best_val_loss=avg_val_loss
+            BEST_MODEL=model.state_dict()
+            #save the best model
+            print(f"Saving best model at epoch {epoch+1}")
+            torch.save(BEST_MODEL,os.path.join(BEST_MODEL_PATH,'best_segformer_model.pt'))
+            
+        
         #append to list
         val_loss.append(avg_val_loss)
         val_mIOU.append(val_epoch_mIOU)
     
-        print(f"Training loss: {avg_train_loss: .4f} | train mIOU: {train_epoch_mIOU: .4f})\n")
-        print(f"Validation loss: {avg_val_loss: .4f} | val mIOU: {val_epoch_mIOU: .4f})")
+        print(f"Training loss: {avg_train_loss: .4f} | train mIOU: {train_epoch_mIOU: .4f})")
+        print(f"Validation loss: {avg_val_loss: .4f} | val mIOU: {val_epoch_mIOU: .4f})\n")
         
         #log to wandb
         wandb.log({
@@ -250,10 +265,11 @@ def train(model,epochs,optimiser,metric,train_dataloader,val_dataloader):
             "val/mIoU": val_epoch_mIOU,
         })
 
+    return os.path.join(BEST_MODEL_PATH,'best_segformer_model.pt')
 
-def peek_segformer_results(model, val_dataset, device, file_name, num_images=2, seed=42):
+def peek_segformer_results(best_model, val_dataset, device, file_name, num_images=2, seed=42):
     random.seed(seed)
-    model.eval()
+    best_model.eval()
     
     indices = random.sample(range(len(val_dataset)), num_images)
     
@@ -265,7 +281,7 @@ def peek_segformer_results(model, val_dataset, device, file_name, num_images=2, 
     
     fig, axes = plt.subplots(num_images, 3, figsize=(15, 5 * num_images))
     if num_images == 1:
-        axes = np.expand_dims(axes, axis=0)  # <-- FIX 1: Fixes 1-image plot indexing
+        axes = np.expand_dims(axes, axis=0)
     
     with torch.no_grad():
         for row, idx in enumerate(indices):
@@ -279,7 +295,9 @@ def peek_segformer_results(model, val_dataset, device, file_name, num_images=2, 
          
             transformed_gt = label_transformation(gt_tensor).squeeze(0).squeeze(0)
             
-            outputs = model(pixel_values=transformed_img)
+            #load best model
+            
+            outputs = best_model(pixel_values=transformed_img)
             upsampled_logits = torch.nn.functional.interpolate(
                 outputs.logits, size=transformed_gt.shape[-2:], mode="bilinear", align_corners=False
             )
@@ -352,9 +370,15 @@ if __name__=="__main__":
     
     #start training
     print("Start Training....")
-    train(model=model,epochs=args.epochs,optimiser=optimiser,metric=metric,train_dataloader=train_dataloader,val_dataloader=val_dataloader)
+    model_path=train(model=model,epochs=args.epochs,optimiser=optimiser,metric=metric,train_dataloader=train_dataloader,val_dataloader=val_dataloader)
     print("training finished")
+    
     
     #peek results
     print("Visualizing results...")
-    peek_segformer_results(model=model,val_dataset=val_dataset,device=device,file_name=args.file_name)
+    #load best model
+    state_dict=torch.load(model_path,map_location=device)
+    model.load_state_dict(state_dict)
+    
+    
+    peek_segformer_results(best_model=model,val_dataset=val_dataset,device=device,file_name=args.file_name)
