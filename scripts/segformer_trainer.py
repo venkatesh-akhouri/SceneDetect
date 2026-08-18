@@ -14,6 +14,7 @@ import random
 import numpy as np
 import matplotlib.pyplot as plt
 from cityscapesscripts.helpers.labels import trainId2label
+import  torchvision.transforms.v2 as T
 
 #set device
 if torch.cuda.is_available():
@@ -50,12 +51,13 @@ EVAL_PATH=os.path.join(ROOT_DIR,'data','evaluation')
 
 
 
-#define transformations
-train_transform = A.Compose([
-                # flip
-                A.HorizontalFlip(p=0.3),
-                A.Rotate(limit=(-10, 10), p=0.3),
-                A.ColorJitter(brightness=0.4, contrast=0.4, saturation=0.4, hue=0.1)])
+# #define transformations
+# train_transform = A.Compose([
+#                 # flip
+#                 A.HorizontalFlip(p=0.3),
+#                 A.Rotate(limit=(-10, 10), p=0.3),
+#                 A.ColorJitter(brightness=0.4, contrast=0.4, saturation=0.4, hue=0.1)])
+
 
 class CityScapesDataset(Dataset):
     def __init__(self, images_dir, labels_dir, transform=None):
@@ -94,27 +96,40 @@ class CityScapesDataset(Dataset):
       
         label_arr=cv2.imread(label_file,flags=cv2.IMREAD_UNCHANGED)
         
-        if self.transform:
-            augmentation = self.transform(image=img_arr,mask=label_arr)
-            img,label=augmentation['image'],augmentation['mask']
-        else:
-            img=img_arr
-            label=label_arr
-        encoded=self.processor(images=img,segmentation_maps=label,return_tensors="pt")
+        #not doing any preprocesing or transformation here
+        # if self.transform:
+        #     augmentation = self.transform(image=img_arr,mask=label_arr)
+        #     img,label=augmentation['image'],augmentation['mask']
+        # else:
+        #     img=img_arr
+        #     label=label_arr
+        # encoded=self.processor(images=img,segmentation_maps=label,return_tensors="pt")
+        #
+        # pixel_values=encoded['pixel_values'].squeeze(0)
+        # label=encoded['labels'].squeeze(0)
+        #
+        #
+        # return pixel_values,label
         
-        pixel_values=encoded['pixel_values'].squeeze(0)
-        label=encoded['labels'].squeeze(0)
+        img_tensor=torch.from_numpy(img_arr).permute(2,0,1).float()/255.0
+        label_tensor=torch.from_numpy(label_arr).long()
         
-       
-        return pixel_values,label
+        return img_tensor,label_tensor
 
 #get dataset set
-train_dataset=CityScapesDataset(Path(TRAIN_IMAGES_DIR),Path(TRAIN_LABELS_DIR),train_transform)
+train_dataset=CityScapesDataset(Path(TRAIN_IMAGES_DIR),Path(TRAIN_LABELS_DIR))
 val_dataset=CityScapesDataset(Path(VAL_IMAGES_DIR),Path(VAL_LABELS_DIR))
 
 
 
+transformation=T.Compose([T.Resize((512,512),interpolation=T.InterpolationMode.BILINEAR,antialias=True),
+                          T.Normalize(mean=[0.485, 0.456, 0.406],std=[0.229, 0.224, 0.225])])
 
+
+label_transformation=T.Resize(
+    (512, 512),
+    interpolation=T.InterpolationMode.NEAREST
+)
 
 #train function
 def train(model,epochs,optimiser,metric,train_dataloader,val_dataloader):
@@ -141,8 +156,14 @@ def train(model,epochs,optimiser,metric,train_dataloader,val_dataloader):
             img,label=batch
             
             #put them on gpu
-            img=img.to(device)
-            label=label.to(device)
+            img=img.to(device,non_blocking=True)
+            label=label.to(device,non_blocking=True)
+            
+            #befre forward pass, apply transformations
+            img=transformation(img)
+            label=label_transformation(label.unsqueeze(1)).squeeze(1)
+            
+            
             #forward pass
             output_logits=model(pixel_values=img,labels=label)
             upsampled_logits=torch.nn.functional.interpolate(
@@ -183,8 +204,14 @@ def train(model,epochs,optimiser,metric,train_dataloader,val_dataloader):
             # load the validation batch
             for val_batch in tqdm(val_dataloader, desc=f'Epoch: {epoch + 1}/{epochs} Validation'):
                 val_image, val_label = val_batch
-                val_image = val_image.to(device)
-                val_label = val_label.to(device)
+                val_image = val_image.to(device,non_blocking=True)
+                val_label = val_label.to(device,non_blocking=True)
+                
+                #transform validation data as well
+                val_image=transformation(val_image)
+                val_label=label_transformation(val_label.unsqueeze(1)).squeeze(1)
+              
+                
                 
                 val_op_logits = model(pixel_values=val_image, labels=val_label)
                 upsampled_logits = torch.nn.functional.interpolate(
@@ -222,49 +249,63 @@ def train(model,epochs,optimiser,metric,train_dataloader,val_dataloader):
             "val/loss": avg_val_loss,
             "val/mIoU": val_epoch_mIOU,
         })
-        
-def peek_segformer_results(model, val_dataset, device,file_name, num_images=2, seed=42):
+
+
+def peek_segformer_results(model, val_dataset, device, file_name, num_images=2, seed=42):
     random.seed(seed)
     model.eval()
-
+    
     indices = random.sample(range(len(val_dataset)), num_images)
-
-    # build trainId -> RGB color lookup, using Cityscapes' official palette
+    
     color_lookup = np.zeros((256, 3), dtype=np.uint8)
     for train_id, label in trainId2label.items():
         if train_id in (255, -1):
             continue
         color_lookup[train_id] = label.color
-
+    
     fig, axes = plt.subplots(num_images, 3, figsize=(15, 5 * num_images))
     if num_images == 1:
-        axes = axes.reshape(1, -1)
-
+        axes = np.expand_dims(axes, axis=0)  # <-- FIX 1: Fixes 1-image plot indexing
+    
     with torch.no_grad():
         for row, idx in enumerate(indices):
-            pixel_values, gt_mask = val_dataset[idx]
-            input_tensor = pixel_values.unsqueeze(0).to(device)
-
-            outputs = model(pixel_values=input_tensor)
+            raw_img, raw_gt = val_dataset[idx]
+            
+            img_tensor = raw_img.unsqueeze(0).to(device)
+   
+            gt_tensor = raw_gt.unsqueeze(0).unsqueeze(0).to(device)
+            
+            transformed_img = transformation(img_tensor)
+         
+            transformed_gt = label_transformation(gt_tensor).squeeze(0).squeeze(0)
+            
+            outputs = model(pixel_values=transformed_img)
             upsampled_logits = torch.nn.functional.interpolate(
-                outputs.logits, size=gt_mask.shape[-2:], mode="bilinear", align_corners=False
+                outputs.logits, size=transformed_gt.shape[-2:], mode="bilinear", align_corners=False
             )
+            
             pred_mask = torch.argmax(upsampled_logits, dim=1).squeeze(0).cpu().numpy()
-            gt_mask = gt_mask.cpu().numpy()
-
-            # un-normalize the image tensor back to a viewable 0-1 range
-            img_disp = pixel_values.permute(1, 2, 0).cpu().numpy()
-            img_disp = (img_disp - img_disp.min()) / (img_disp.max() - img_disp.min())
-
+            gt_mask = transformed_gt.cpu().numpy()
+            
+            img_disp = transformed_img.squeeze(0).permute(1, 2, 0).cpu().numpy()
+            img_disp = (img_disp - img_disp.min()) / (img_disp.max() - img_disp.min() + 1e-8)
+            
             gt_color = color_lookup[np.clip(gt_mask, 0, 255)]
             pred_color = color_lookup[np.clip(pred_mask, 0, 255)]
-
-            axes[row, 0].imshow(img_disp); axes[row, 0].set_title(f"Input (idx {idx})"); axes[row, 0].axis("off")
-            axes[row, 1].imshow(gt_color); axes[row, 1].set_title("Ground Truth"); axes[row, 1].axis("off")
-            axes[row, 2].imshow(pred_color); axes[row, 2].set_title("Prediction"); axes[row, 2].axis("off")
-
+            
+            axes[row, 0].imshow(img_disp);
+            axes[row, 0].set_title(f"Input (idx {idx})");
+            axes[row, 0].axis("off")
+            axes[row, 1].imshow(gt_color);
+            axes[row, 1].set_title("Ground Truth");
+            axes[row, 1].axis("off")
+            axes[row, 2].imshow(pred_color);
+            axes[row, 2].set_title("Prediction");
+            axes[row, 2].axis("off")
+    
+    os.makedirs(EVAL_PATH, exist_ok=True)
     plt.tight_layout()
-    out_path=os.path.join(EVAL_PATH, file_name)
+    out_path = os.path.join(EVAL_PATH, file_name)
     plt.savefig(out_path, dpi=150, bbox_inches="tight")
     print(f"Saved peek visualization to {out_path}")
         
@@ -284,7 +325,7 @@ def argument_paser():
     parser.add_argument("--batch", type=int, help="batch size", default=32)
     parser.add_argument("--lr", type=float, help="learning rate", default=1e-3)
     parser.add_argument("--run_name", type=str, help="run name", default="Test Run")
-    parser.add_argument("--file_name", type=int, help="file name to save visualisation", default="segformer_vis.png")
+    parser.add_argument("--file_name", type=str, help="file name to save visualisation", default="segformer_vis.png")
     
     
     return parser.parse_args()
@@ -304,8 +345,8 @@ if __name__=="__main__":
     
     # craete dataloaders
     print("Creating data loaders...")
-    train_dataloader = DataLoader(train_dataset, batch_size=args.batch, shuffle=True)
-    val_dataloader = DataLoader(val_dataset, batch_size=args.batch, shuffle=False)
+    train_dataloader = DataLoader(train_dataset, batch_size=args.batch, shuffle=True,num_workers=4,pin_memory=True,persistent_workers=True)
+    val_dataloader = DataLoader(val_dataset, batch_size=args.batch, shuffle=False,num_workers=4,pin_memory=True,persistent_workers=True)
     
     optimiser=torch.optim.AdamW(model.parameters(), lr=args.lr)
     
