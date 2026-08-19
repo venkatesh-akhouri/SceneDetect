@@ -15,6 +15,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from cityscapesscripts.helpers.labels import trainId2label
 import  torchvision.transforms.v2 as T
+from torchvision import tv_tensors as TV
 
 #set device
 if torch.cuda.is_available():
@@ -46,7 +47,7 @@ TRAIN_IMAGES_DIR=os.path.join(ROOT_DIR,'data','cityscapes','images','train')
 VAL_IMAGES_DIR=os.path.join(ROOT_DIR,'data','cityscapes','images','val')
 TRAIN_LABELS_DIR=os.path.join(ROOT_DIR,'data','cityscapes','gt','train')
 VAL_LABELS_DIR=os.path.join(ROOT_DIR,'data','cityscapes','gt','val')
-EVAL_PATH=os.path.join(ROOT_DIR,'data','evaluation')
+EVAL_PATH=os.path.join(ROOT_DIR,'evaluation','results')
 BEST_MODEL_PATH=os.path.join(ROOT_DIR,'models')
 #in case if directory does not exist
 os.makedirs(BEST_MODEL_PATH,exist_ok=True)
@@ -60,6 +61,15 @@ os.makedirs(BEST_MODEL_PATH,exist_ok=True)
 #                 A.Rotate(limit=(-10, 10), p=0.3),
 #                 A.ColorJitter(brightness=0.4, contrast=0.4, saturation=0.4, hue=0.1)])
 
+#define augmentations
+train_augmentions=T.Compose([
+    T.RandomResizedCrop((512,512),scale=(0.5,1.0),interpolation=T.InterpolationMode.BILINEAR),
+    T.RandomHorizontalFlip(p=0.4),
+    T.RandomRotation(degrees=(-10,10),fill={TV.Image: 0, TV.Mask: 255}),
+    T.ColorJitter(brightness=0.3, contrast=0.3, saturation=0.3, hue=0.1),
+    T.RandomApply([T.GaussianBlur(kernel_size=(3, 5))], p=0.2),
+T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+])
 
 class CityScapesDataset(Dataset):
     def __init__(self, images_dir, labels_dir, transform=None):
@@ -141,7 +151,8 @@ def train(model,epochs,optimiser,metric,train_dataloader,val_dataloader):
     val_mIOU=[]
     
     best_val_loss=float('inf')
-    
+    #create learning scheduler
+    scheduler=torch.optim.lr_scheduler.CosineAnnealingLR(optimiser,T_max=epochs)
     for epoch in range(epochs):
         train_epoch_loss=0
         val_epoch_loss=0
@@ -165,15 +176,22 @@ def train(model,epochs,optimiser,metric,train_dataloader,val_dataloader):
             img=img.to(device,non_blocking=True)
             label=label.to(device,non_blocking=True)
             
-            #befre forward pass, apply transformations
-            img=transformation(img)
-            label=label_transformation(label.unsqueeze(1)).squeeze(1)
+            #wrap then into tv_tensors
+            img_tv=TV.Image(img)
+            label_tv=TV.Mask(label)
+            
+            #augment the data
+            img_tv,label_tv=train_augmentions(img_tv, label_tv)
+            
+            # #befre forward pass, apply transformations
+            # img=transformation(img_tv)
+            # label=label_transformation(label_tv.unsqueeze(1)).squeeze(1)
             
             
             #forward pass
-            output_logits=model(pixel_values=img,labels=label)
+            output_logits=model(pixel_values=img_tv,labels=label_tv)
             upsampled_logits=torch.nn.functional.interpolate(
-                output_logits.logits, size=label.shape[-2:], mode="bilinear", align_corners=False
+                output_logits.logits, size=label_tv.shape[-2:], mode="bilinear", align_corners=False
             )
             
             #get prections
@@ -185,9 +203,14 @@ def train(model,epochs,optimiser,metric,train_dataloader,val_dataloader):
             train_epoch_loss += batch_loss.item()
             
             #calculate mean_iou
-            metric.add_batch(predictions=preds.cpu().numpy(), references=label.cpu().numpy())
+            metric.add_batch(predictions=preds.cpu().numpy(), references=label_tv.cpu().numpy())
             
-            batch_loss.backward()
+            batch_loss.backward()  #computed the gradiesnts and stores in .grad
+            #apply gradient clipping
+            
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+            
+            
             optimiser.step()
         
         #compute the metrics
@@ -202,6 +225,9 @@ def train(model,epochs,optimiser,metric,train_dataloader,val_dataloader):
         #append to list
         train_loss.append(avg_train_loss)
         train_mIOU.append(train_epoch_mIOU)
+        
+        #lr schedular
+        scheduler.step()
         
         # validate on validation data
         model.eval()
