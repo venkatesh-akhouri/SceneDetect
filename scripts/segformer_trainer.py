@@ -143,8 +143,34 @@ label_transformation=T.Resize(
     interpolation=T.InterpolationMode.NEAREST
 )
 
+def compute_inverse_class_weights(label_file_list):
+    pixel_count=np.zeros(19,dtype=np.int64)
+    for label_file in tqdm(label_file_list,desc="Calculating class weights..."):
+        label_img_arr=cv2.imread(label_file,flags=cv2.IMREAD_UNCHANGED)
+        pixel_val,count=np.unique(label_img_arr,return_counts=True)
+        
+        #create a boolean mask
+        mask=pixel_val!=255
+        pixel_count[pixel_val[mask]]+=count[mask]
+    
+    
+    num_class=pixel_count.shape[0]
+    
+    #inverse frequencey class weights
+    #weight_c = total_samples / (num_classes × count_c),
+    total_pixel_count=np.sum(pixel_count)
+    
+    
+    inverse_wt_count=total_pixel_count/(num_class*pixel_count)
+    
+    return inverse_wt_count
+    
+        
+    
+    
+
 #train function
-def train(model,epochs,optimiser,metric,train_dataloader,val_dataloader):
+def train(model,epochs,optimiser,metric,train_dataloader,val_dataloader,class_weights):
     train_loss=[]
     val_loss=[]
     train_mIOU=[]
@@ -153,6 +179,9 @@ def train(model,epochs,optimiser,metric,train_dataloader,val_dataloader):
     best_val_loss=float('inf')
     #create learning scheduler
     scheduler=torch.optim.lr_scheduler.CosineAnnealingLR(optimiser,T_max=epochs)
+    
+    weighted_loss = torch.nn.CrossEntropyLoss(weight=class_weights,
+                                              ignore_index=255)
     for epoch in range(epochs):
         train_epoch_loss=0
         val_epoch_loss=0
@@ -189,17 +218,22 @@ def train(model,epochs,optimiser,metric,train_dataloader,val_dataloader):
             
             
             #forward pass
-            output_logits=model(pixel_values=img_tv,labels=label_tv)
+            output_logits=model(pixel_values=img_tv)
             upsampled_logits=torch.nn.functional.interpolate(
                 output_logits.logits, size=label_tv.shape[-2:], mode="bilinear", align_corners=False
             )
+            
+            #now compute the loss
+          
+           
+    
             
             #get prections
             preds=torch.argmax(upsampled_logits,dim=1)
             
             #get the loss
             #loss is calculated under the hood
-            batch_loss=output_logits.loss
+            batch_loss=weighted_loss(upsampled_logits,label_tv)
             train_epoch_loss += batch_loss.item()
             
             #calculate mean_iou
@@ -352,8 +386,8 @@ def peek_segformer_results(best_model, val_dataset, device, file_name, num_image
     out_path = os.path.join(EVAL_PATH, file_name)
     plt.savefig(out_path, dpi=150, bbox_inches="tight")
     print(f"Saved peek visualization to {out_path}")
-        
-        
+    
+    
 def argument_paser():
     '''
     function to implement CLI
@@ -394,9 +428,17 @@ if __name__=="__main__":
     
     optimiser=torch.optim.AdamW(model.parameters(), lr=args.lr)
     
+    #get list of label files
+    label_files=[str(sample[1]) for sample in train_dataset.samples]
+    
+    #get inverse wt counts
+    print("calculating class weights...")
+    inverse_wt_counts=compute_inverse_class_weights(label_files)
+    class_weights=torch.tensor(inverse_wt_counts,dtype=torch.float32).to(device)
     #start training
     print("Start Training....")
-    model_path=train(model=model,epochs=args.epochs,optimiser=optimiser,metric=metric,train_dataloader=train_dataloader,val_dataloader=val_dataloader)
+    model_path=train(model=model,epochs=args.epochs,optimiser=optimiser,metric=metric,train_dataloader=train_dataloader,val_dataloader=val_dataloader,
+                     class_weights=class_weights)
     print("training finished")
     
     
