@@ -39,6 +39,7 @@ model=model.to(device)
 
 #set metric
 metric=evaluate.load("mean_iou")
+val_metric=evaluate.load("mean_iou")
 
 #GLOBAL VARIABLES
 SCRIPT_DIR=os.path.dirname(os.path.abspath(__file__))
@@ -159,9 +160,9 @@ def compute_inverse_class_weights(label_file_list):
     #inverse frequencey class weights
     #weight_c = total_samples / (num_classes × count_c),
     total_pixel_count=np.sum(pixel_count)
+    normalised_pxl_counts=pixel_count/total_pixel_count
     
-    
-    inverse_wt_count=total_pixel_count/(num_class*pixel_count)
+    inverse_wt_count=1/np.log(1.02+normalised_pxl_counts)
     
     return inverse_wt_count
     
@@ -170,7 +171,7 @@ def compute_inverse_class_weights(label_file_list):
     
 
 #train function
-def train(model,epochs,optimiser,metric,train_dataloader,val_dataloader,class_weights):
+def train(model,epochs,optimiser,metric,val_metric,train_dataloader,val_dataloader,class_weights):
     train_loss=[]
     val_loss=[]
     train_mIOU=[]
@@ -223,7 +224,7 @@ def train(model,epochs,optimiser,metric,train_dataloader,val_dataloader,class_we
                 output_logits.logits, size=label_tv.shape[-2:], mode="bilinear", align_corners=False
             )
             
-            #now compute the loss
+            #
           
            
     
@@ -289,13 +290,19 @@ def train(model,epochs,optimiser,metric,train_dataloader,val_dataloader,class_we
                 val_batch_loss = val_op_logits.loss
                 val_epoch_loss += val_batch_loss.item()
                 
-                metric.add_batch(predictions=val_preds.cpu().numpy(), references=val_label.cpu().numpy())
+                val_metric.add_batch(predictions=val_preds.cpu().numpy(), references=val_label.cpu().numpy())
                 
             
             #compute the metrics
-            val_results = metric.compute(num_labels=19, ignore_index=255)
+            val_results = val_metric.compute(num_labels=19, ignore_index=255)
+            
+            
             
             val_epoch_mIOU = val_results['mean_iou']
+            per_class_ious = {
+                f"val/IoU_{trainId2label[i].name}": iou
+                for i, iou in enumerate(val_results['per_category_iou'])
+            }
             
         avg_val_loss = val_epoch_loss/len(val_dataloader)
         
@@ -306,7 +313,7 @@ def train(model,epochs,optimiser,metric,train_dataloader,val_dataloader,class_we
             BEST_MODEL=model.state_dict()
             #save the best model
             print(f"Saving best model at epoch {epoch+1}")
-            torch.save(BEST_MODEL,os.path.join(BEST_MODEL_PATH,'best_segformer_model.pt'))
+            torch.save(BEST_MODEL,os.path.join(BEST_MODEL_PATH,'best_segformer_model_clss_wts_norm.pt'))
             
         
         #append to list
@@ -323,9 +330,10 @@ def train(model,epochs,optimiser,metric,train_dataloader,val_dataloader,class_we
             "train/mIoU": train_epoch_mIOU,
             "val/loss": avg_val_loss,
             "val/mIoU": val_epoch_mIOU,
+            **per_class_ious
         })
 
-    return os.path.join(BEST_MODEL_PATH,'best_segformer_model.pt')
+    return os.path.join(BEST_MODEL_PATH,'best_segformer_model_clss_wts_norm.pt')
 
 def peek_segformer_results(best_model, val_dataset, device, file_name, num_images=2, seed=42):
     random.seed(seed)
@@ -417,7 +425,17 @@ if __name__=="__main__":
     wandb.login()
     
     # initalise project
-    wandb.init(project="Finetune Segformer",name=args.run_name)
+    wandb.init(project="Finetune Segformer",name=args.run_name,
+               config={
+                   "epochs": args.epochs,
+                   "batch_size": args.batch,
+                   "learning_rate": args.lr,
+                   "model_id": model_id,
+                   "weighting_strategy": "ENet (c=1.02)",
+                   "optimizer": "AdamW",
+                   "scheduler": "CosineAnnealingLR",
+                   "image_size": (512, 512)}
+               )
     
     
     
@@ -437,7 +455,7 @@ if __name__=="__main__":
     class_weights=torch.tensor(inverse_wt_counts,dtype=torch.float32).to(device)
     #start training
     print("Start Training....")
-    model_path=train(model=model,epochs=args.epochs,optimiser=optimiser,metric=metric,train_dataloader=train_dataloader,val_dataloader=val_dataloader,
+    model_path=train(model=model,epochs=args.epochs,optimiser=optimiser,metric=metric,val_metric=val_metric,train_dataloader=train_dataloader,val_dataloader=val_dataloader,
                      class_weights=class_weights)
     print("training finished")
     
