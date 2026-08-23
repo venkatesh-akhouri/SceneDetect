@@ -1,3 +1,4 @@
+#adding test file to data.yaml
 import yaml
 import os
 
@@ -24,6 +25,7 @@ yaml_dict={
     "path":images_dir,
     "train":"train",
     "val":"val",
+    "test":"test",
     "names":{value:key for key,value in class_map.items()}
 }
 
@@ -31,4 +33,7 @@ yaml_dict={
 yaml_file=f"{yaml_path}/data.yaml"
 with open(yaml_file, "w") as f:
     yaml.dump(yaml_dict, f)
+
+print(f"Wrote {yaml_file}")
+
     
