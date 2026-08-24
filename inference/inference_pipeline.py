@@ -6,6 +6,7 @@ from torchvision import transforms as T
 import cv2
 from cityscapesscripts.helpers.labels import trainId2label
 import numpy as np
+import argparse
 
 
 
@@ -16,6 +17,13 @@ else:
     device=torch.device('cpu')
     print("Using CPU")
 
+
+#get directories
+script_dir=os.path.dirname(os.path.abspath(__file__))
+root_dir=os.path.dirname(script_dir)
+EVAL_PATH=os.path.join(root_dir,"inference","eval")
+if not os.path.exists(EVAL_PATH):
+    os.makedirs(EVAL_PATH,exist_ok=True)
 
 segformer_model_id='nvidia/segformer-b0-finetuned-ade-512-512'
 
@@ -42,7 +50,7 @@ def load_models(yolo_path, segformer_path,device):
     return yolo_model, segformer_model
 
 
-def run_inference_pipeline(yolo_model, segformer_model,image,device):
+def run_inference_pipeline(yolo_model, segformer_model,image,device,save_file_name):
     yolo_op=yolo_model.predict(image,imgsz=960,device=device)
     
     image_array=cv2.imread(image)
@@ -72,5 +80,36 @@ def run_inference_pipeline(yolo_model, segformer_model,image,device):
     op_image=yolo_op[0].plot(img=BGR_image)
     
     #save this
-    cv2.imwrite("resultant.png",op_image)
+    saved=os.path.join(EVAL_PATH,save_file_name)
+    cv2.imwrite(saved,op_image)
+    print(f"Saved at {saved}")
+
+
+def argeparser():
+    parser = argparse.ArgumentParser()
     
+    parser.add_argument('--image',type=str)
+    parser.add_argument('--file_name',type=str)
+    
+    return parser.parse_args()
+    
+    
+
+
+if __name__ == "__main__":
+    
+    args=argeparser()
+    
+    #load models
+    yolo_path = "/workspace/scenedetect/runs/detect/SceneDetect-Freeze_Layers/Full_Fine_Tune_Baseline-2/weights/best.pt"
+    segformer_path = "/workspace/scenedetect/models/best_segformer_model_clss_wts_norm.pt"
+    
+    yolo_model,segformer_model=load_models(yolo_path,segformer_path,device)
+    
+    #run inference
+    print("Running inference pipeline")
+    run_inference_pipeline(yolo_model,segformer_model,args.image,device,args.file_name)
+    print("Finished inference pipeline")
+    
+
+
