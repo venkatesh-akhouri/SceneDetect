@@ -113,5 +113,5 @@ destabilizing training on the common ones. For loss weighting strategy E-net sty
 | **mIoU (all 19)** | **0.622** |
 
 
-### Inference Pipeline
+
 
