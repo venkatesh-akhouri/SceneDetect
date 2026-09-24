@@ -10,7 +10,7 @@ Given any street scene image, the pipeline overlays SegFormer's per-pixel scene 
 The pipeline was tested on real, unseen photos and neither model was trained or validated on either image.
 
 ### Demo
- ### Demo
+
 | Input | Output |
 |---|---|
 | ![Aerial traffic input](inference/image3.jpg) | ![Aerial traffic output](inference/resultant_image3.jpg) |
