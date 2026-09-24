@@ -9,5 +9,8 @@ wheels/
 # Virtual environments
 .venv
 
-./data
+/data
+data.yaml
+.DS_Store
 
+/runs
