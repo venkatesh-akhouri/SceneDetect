@@ -3,8 +3,9 @@
 Object detection and semantic segmentation for autonomous driving scenes by combining YOLO finetuned on KITTI for object detection along with a SegFormer finetuned on Cityscapes into a single image inference pipeline.
 
 Run the following command to run the inference
+```bash
 python main.py --image <path> --file_name <name>
-
+```
 
 Given any street scene image, the pipeline overlays SegFormer's per-pixel scene segmentation  underneath the YOLO's object detections thereby producing a single annotated image. 
 The pipeline was tested on real, unseen photos and neither model was trained or validated on either image.
@@ -17,7 +18,7 @@ The pipeline was tested on real, unseen photos and neither model was trained or 
 | ![Tokyo input](inference/image1.jpg) | ![Tokyo output](inference/resultant_image1.jpg) |
 | ![NYC input](inference/image2.jpg) | ![NYC output](inference/resultant_image2.jpg) |
 
-* The demo was tested on random images from, neither of which was used for validation or was part of test set.
+* The demo was tested on random images, neither of which was used for validation or was part of test set.
 
 **In-domain baseline** — a held-out KITTI test image the model never saw during training, for comparison against the out-of-domain photos above:
 
@@ -28,8 +29,7 @@ The pipeline was tested on real, unseen photos and neither model was trained or 
 ### Inference Pipeline
 
 The two models YOLO11n and SegFormer run independently on the same original image, detection gives discrete boxes and segmentation provides a per-pixel class map which are merged only at the end, purely for visualization.
-The segmentation mask is upsampled to the image's native resolution, colorized and blended underneath the image with YOLO's boxes drawn on top. Full architecture, coordinate-space and implementation details are discussed in [Inference Pipeline](#inference-pipeline) section below.
-
+The segmentation mask is upsampled to the image's native resolution, colorized and blended underneath the image with YOLO's boxes drawn on top.
 ### Results at a Glance
 
 | Component | Metric | Score |
@@ -53,7 +53,7 @@ holding all other hyperparameters (batch, optimizer, augmentation, dataset split
 | 0 | 640 | 0.908 | 0.853 | 0.915 | 0.686 |
 | 0 | 960 | 0.935 | 0.891 | 0.947 | 0.745 |
 
-** Both variables improved the results independently and their effects roughly stack (best model uses both). But their *magnitude* differs:
+**Both variables improved the results independently and their effects roughly stack (best model uses both). But their *magnitude* differs**:
  
 - Unfreezing the backbone alone (640, freeze 10→0): mAP50-95 **+0.056** (0.630 → 0.686)
 - Increasing resolution alone (freeze=10, 640→960): mAP50-95 **+0.073** (0.630 → 0.703)
@@ -83,10 +83,7 @@ holding all other hyperparameters (batch, optimizer, augmentation, dataset split
 
 ### Segmentation: SegFormer on Cityscapes
  
-SegFormer-B0 was finetuned on Cityscapes 
-Cityscapes data is heavily class imbalanced like road and building pixels dominate the dataset while classes like traffic light, motorcycle 
-and bicycle are comparatively rare therefore a loss weighting strategy was implemented that helps rare classes without
-destabilizing training on the common ones. For loss weighting strategy E-net style log weighting.
+SegFormer-B0 was finetuned on Cityscapes. Cityscapes data is heavily class imbalanced like road and building pixels dominate the dataset while classes like traffic light, motorcycle and bicycle are comparatively rare therefore a loss weighting strategy was implemented that helps rare classes without destabilizing training on the common ones. For loss weighting strategy E-net style log weighting.
 
 #### Individual classes IoU
 | Class | IoU |
