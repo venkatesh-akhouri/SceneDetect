@@ -1,15 +1,29 @@
 ## SceneDetect
 
-Object detection and semantic segmentation for autonomous driving scenes by combining YOLO finetuned on KITTI for object detection along with a SegFormer finetuned on Cityscapes into a single image inference pipeline, deployed as app on Hugging Face Spaces.
+Object detection and semantic segmentation for autonomous driving scenes by combining YOLO finetuned on KITTI for object detection along with a SegFormer finetuned on Cityscapes into a single image inference pipeline.
+
+Run the following command to run the inference
+python main.py --image <path> --file_name <name>
+
 
 Given any street scene image, the pipeline overlays SegFormer's per-pixel scene segmentation  underneath the YOLO's object detections thereby producing a single annotated image. 
 The pipeline was tested on real, unseen photos and neither model was trained or validated on either image.
 
 ### Demo
- Input | Output |
+ ### Demo
+| Input | Output |
 |---|---|
+| ![Aerial traffic input](inference/image3.jpg) | ![Aerial traffic output](inference/resultant_image3.jpg) |
 | ![Tokyo input](inference/image1.jpg) | ![Tokyo output](inference/resultant_image1.jpg) |
 | ![NYC input](inference/image2.jpg) | ![NYC output](inference/resultant_image2.jpg) |
+
+* The demo was tested on random images from, neither of which was used for validation or was part of test set.
+
+**In-domain baseline** — a held-out KITTI test image the model never saw during training, for comparison against the out-of-domain photos above:
+
+| Input | Output |
+|---|---|
+| ![KITTI test input](inference/001710.png) | ![KITTI test output](inference/resultant_001710.png) |
 
 ### Inference Pipeline
 
@@ -29,7 +43,7 @@ The segmentation mask is upsampled to the image's native resolution, colorized a
 
 **Ablation: frozen backbone vs full finetune, at two input resolutions**
 Finetuning was done using 2 different ways where in first the first 10 layers of the model was frozen and then full finetuning to
-assess how different methods impact the results. In both the methods image resolution was tuned frm 640 to 960
+assess how different methods impact the results. In both the methods image resolution was tuned from 640 to 960
 holding all other hyperparameters (batch, optimizer, augmentation, dataset split, epochs=100) constant, to isolate each variable's individual effect.
 
 | Freeze | Img Size | Precision | Recall | mAP50 | mAP50-95 |
@@ -97,4 +111,7 @@ destabilizing training on the common ones. For loss weighting strategy E-net sty
 | Motorcycle | 0.368 |
 | Pole | 0.332 |
 | **mIoU (all 19)** | **0.622** |
+
+
+### Inference Pipeline
 
