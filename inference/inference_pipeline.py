@@ -135,11 +135,11 @@ def argeparser():
 if __name__ == "__main__":
     
     args=argeparser()
-    
+
     #load models
-    yolo_path = "/workspace/scenedetect/runs/detect/SceneDetect-Freeze_Layers/Full_Fine_Tune_Baseline-2/weights/best.pt"
-    segformer_path = "/workspace/scenedetect/models/best_segformer_model_clss_wts_norm.pt"
-    
+    yolo_path = os.path.join(root_dir,"models","best.pt")
+    segformer_path = os.path.join(root_dir,"models","best_segformer_model_clss_wts_norm.pt")
+
     yolo_model,segformer_model=load_models(yolo_path,segformer_path,device)
     
     #run inference
