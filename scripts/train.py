@@ -111,7 +111,7 @@ def peek_results(best_model_path,val_path,random_seed):
     
     model=YOLO(best_model)
     
-    out_path = os.path.join(root_dir, "evaluation", "results", "val_predictions_peek.png")
+    out_path = os.path.join(root_dir, "evaluation", "results", "val_predictions_peek_full_960.png")
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
 
     #get random validation images
